@@ -71,6 +71,14 @@ dialog{border:0;border-radius:20px;padding:26px;width:min(440px,92vw);background
 dialog::backdrop{background:rgba(74,33,48,.45)}
 dialog label{display:block;font-size:.85rem;color:var(--muted);margin:14px 0 4px}
 dialog input,dialog textarea{width:100%;padding:10px 14px;border-radius:12px;border:1px solid var(--line);background:var(--bg)}
+/* tài khoản & thư viện chung */
+.hdr{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+#loginBtn{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.tabs{display:flex;gap:8px;margin-top:14px}
+.dh{margin:0;font-family:var(--display);font-size:1.4rem}
+.dp{color:var(--muted);font-size:.88rem;margin:6px 0 0}
+.err{color:#B3263F;font-size:.85rem;margin:10px 0;min-height:1.3em}
 /* reader */
 .reader{position:fixed;inset:0;z-index:20;overflow-y:auto;background:var(--rbg);color:var(--rink);transition:background .25s,color .25s;-webkit-overflow-scrolling:touch}
 .reader[hidden]{display:none}
@@ -153,7 +161,7 @@ dialog input,dialog textarea{width:100%;padding:10px 14px;border-radius:12px;bor
 <body>
 <header class="top">
   <button class="brand" data-act="home">✿ Tủ truyện của Nhi</button>
-  <button class="btn" data-act="theme" id="themeBtn">🌙 Chế độ tối</button>
+  <div class="hdr"><button class="btn" data-act="pub">📚 Thư viện chung</button><button class="btn" data-act="login" id="loginBtn">Đăng nhập</button><button class="btn" data-act="theme" id="themeBtn">🌙 Chế độ tối</button></div>
 </header>
 <main id="app"></main>
 
@@ -167,6 +175,8 @@ dialog input,dialog textarea{width:100%;padding:10px 14px;border-radius:12px;bor
     <button type="submit" class="btn primary">Lưu</button>
   </div>
 </form></dialog>
+
+<dialog id="authDlg"><div id="authBody"></div></dialog>
 
 <input type="file" id="imgIn" accept="image/*" hidden>
 <dialog id="dlg2"><div>
@@ -256,6 +266,7 @@ const chap=()=>novel()?.chapters.find(c=>c.id===view.cid);
 const total=n=>n.chapters.reduce((a,c)=>a+words(c.content),0);
 
 function render(){
+  if(view.n==='pub'){renderPub();return}
   const n=novel();
   if(view.n==='lib'||!n){view.n='lib';
     app.innerHTML=`<div class="wrap"><h1 class="page">Tủ truyện của bạn</h1><p class="sub">Mỗi bộ tiểu thuyết là một cuốn sách riêng, tự động lưu trên trình duyệt này.</p>
@@ -268,7 +279,7 @@ function render(){
     ${n.desc?`<p class="desc">${esc(n.desc)}</p>`:''}
     <div class="row" style="margin-top:18px"><button class="btn primary" data-act="newChap">+ Chương mới</button>
     <button class="btn" data-act="readFirst" ${n.chapters.length?'':'disabled'}>Đọc từ đầu</button>
-    <button class="btn" data-act="editNovel">Sửa thông tin</button><button class="btn danger" data-act="delNovel">Xóa truyện</button></div>
+    <button class="btn" data-act="editNovel">Sửa thông tin</button>${pubBtns(n)}<button class="btn danger" data-act="delNovel">Xóa truyện</button></div>
     <div class="chapters">${n.chapters.length?n.chapters.map((c,i)=>`<div class="ch"><div class="no">${i+1}</div><div class="t" data-act="edit" data-id="${c.id}"><b>${esc(c.title||'Chương chưa đặt tên')}</b><span>${words(c.content).toLocaleString('vi-VN')} từ</span></div>
     <button class="btn" data-act="read" data-id="${c.id}">Đọc</button><button class="btn" data-act="edit" data-id="${c.id}">Viết</button><button class="btn danger" data-act="delChap" data-id="${c.id}" aria-label="Xóa chương">✕</button></div>`).join(''):`<div class="empty"><p>Truyện chưa có chương nào. Thêm chương đầu tiên để bắt đầu viết.</p></div>`}</div></div>`;
   }else if(view.n==='edit'){
@@ -390,6 +401,17 @@ document.addEventListener('click',e=>{
     case 'ncancel':closeNote();break;
     case 'ndel':{const c=chap();c.marks=(c.marks||[]).filter(m=>m.g!==ed.g);persist();closeNote();repaint();break}
     case 'rprev':case 'rnext':{const i=n.chapters.indexOf(chap())+(a==='rnext'?1:-1);if(n.chapters[i])openReader(n.chapters[i].id);break}
+    case 'pub':flush();view={n:'pub'};render();break;
+    case 'pubRefresh':pubCache=null;renderPub();break;
+    case 'openPub':openStory(id);break;
+    case 'login':openAuth();break;
+    case 'pubNovel':pubAction('pub');break;
+    case 'unpub':pubAction('unpub');break;
+    case 'copyLink':copyLink();break;
+    case 'aMode':aMode=b.dataset.m;aErr='';authPaint();break;
+    case 'aGoogle':authGoogle();break;
+    case 'aLogout':authLogout();break;
+    case 'aClose':$('#authDlg').close();break;
     case 'rtheme':rs.theme=b.dataset.t;applyRs();saveRs();panel('set');break;
   }
 });
@@ -435,7 +457,7 @@ async function saveTmp(){
   const b=$('#rsave');b.textContent='Đang lưu…';b.disabled=true;
   const used=new Set();tmp.chapters.forEach(c=>{for(const m of c.content.matchAll(/\[\[img:([\w-]+)/g))used.add(m[1])});
   for(const id of used){if(imgDB[id]||!imgMem[id])continue;let d=imgMem[id];try{d=await compress(imgMem[id],1100,.8)}catch(e){}imgDB[id]=d;await idbReq('readwrite',s=>s.put(d,id))}
-  const id2=uid();db.novels.unshift({...tmp,id:id2});tmp=null;save();
+  const id2=uid();db.novels.unshift({...tmp,remote:undefined,srcId:undefined,id:id2});tmp=null;save();
   b.textContent='Lưu vào tủ truyện';b.disabled=false;
   ttsStop();$('#reader').hidden=true;document.body.style.overflow='';view={n:'novel',id:id2};render();
 }
@@ -641,8 +663,185 @@ async function importFile(){
   $('#dlg2').close();$('#fFile').value='';$('#fPaste').value='';$('#fName').value='';
   view={n:'lib',id:'tmp'};openReader(ch[0].id);
 }
+/* ===== Đăng nhập & thư viện chung (Firebase) ===== */
+// Dán cấu hình Firebase của bạn vào đây (xem hướng dẫn kèm theo).
+const FIREBASE_CONFIG={apiKey:"",authDomain:"",projectId:"",storageBucket:"",messagingSenderId:"",appId:""};
+const fb={ready:null,loaded:false,failed:false,user:null,a:null,f:null,auth:null,fs:null};
+const fbOn=()=>!!(FIREBASE_CONFIG.apiKey&&FIREBASE_CONFIG.projectId);
+const SAFE_IMG=/^data:image\/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+\/=]+$/;
+const SAFE_ID=/^[\w-]{1,40}$/;
+const userName=u=>u.displayName||(u.email||'Bạn').split('@')[0];
+function fbInit(){
+  if(!fbOn())return Promise.resolve(false);
+  if(fb.ready)return fb.ready;
+  fb.failed=false;
+  fb.ready=(async()=>{
+    const B='https://www.gstatic.com/firebasejs/10.14.1/';
+    const [A,Au,F]=await Promise.all([import(B+'firebase-app.js'),import(B+'firebase-auth.js'),import(B+'firebase-firestore.js')]);
+    const app=A.initializeApp(FIREBASE_CONFIG);
+    fb.a=Au;fb.f=F;fb.auth=Au.getAuth(app);fb.fs=F.getFirestore(app);
+    await new Promise(res=>{let first=true;Au.onAuthStateChanged(fb.auth,u=>{fb.user=u;authUi();if(first){first=false;fb.loaded=true;res()}else if(view.n==='novel')render()})});
+    return true;
+  })().catch(e=>{console.error(e);fb.ready=null;fb.failed=true;return false});
+  return fb.ready;
+}
+function authUi(){const b=$('#loginBtn');if(b)b.textContent=fb.user?'👤 '+userName(fb.user):'Đăng nhập'}
+function fbMsg(e){
+  const c=String(e&&e.code||'').replace('auth/','');
+  if(c==='popup-closed-by-user'||c==='cancelled-popup-request')return '';
+  const M={'invalid-credential':'Email hoặc mật khẩu chưa đúng.','wrong-password':'Email hoặc mật khẩu chưa đúng.','user-not-found':'Email hoặc mật khẩu chưa đúng.','invalid-email':'Email chưa hợp lệ.','email-already-in-use':'Email này đã có tài khoản, hãy đăng nhập.','weak-password':'Mật khẩu cần ít nhất 6 ký tự.','too-many-requests':'Thử quá nhiều lần, hãy đợi một lát rồi thử lại.','network-request-failed':'Không có kết nối mạng.','unauthorized-domain':'Tên miền của trang web chưa được thêm vào Firebase (Authentication → Settings → Authorized domains).','operation-not-allowed':'Cách đăng nhập này chưa được bật trong Firebase (Authentication → Sign-in method).','popup-blocked':'Trình duyệt đã chặn cửa sổ đăng nhập Google.','permission-denied':'Chưa có quyền ghi dữ liệu: hãy kiểm tra Firestore Rules.'};
+  return M[c]||(e&&e.message)||'Có lỗi xảy ra, hãy thử lại.';
+}
+/* hộp thoại đăng nhập */
+let aMode='login',aErr='';
+function openAuth(mode,msg){aMode=mode||'login';aErr=msg||'';authPaint();const d=$('#authDlg');if(!d.open)d.showModal();fbInit().then(authPaint)}
+function authPaint(){
+  const b=$('#authBody');if(!b)return;
+  const keep={n:$('#aName')?.value||'',e:$('#aEmail')?.value||'',p:$('#aPass')?.value||''};
+  const close='<button type="button" class="btn ghost" data-act="aClose">Đóng</button>';
+  let h;
+  if(!fbOn())h=`<h3 class="dh">Chưa kết nối máy chủ</h3><p class="dp">Để có đăng nhập và thư viện chung, hãy dán cấu hình Firebase vào <b>FIREBASE_CONFIG</b> ở đầu phần script trong file index.html.</p><div class="row" style="justify-content:flex-end;margin-top:18px">${close}</div>`;
+  else if(fb.failed)h=`<h3 class="dh">Không kết nối được</h3><p class="dp">Hãy kiểm tra mạng rồi mở lại hộp thoại này.</p><div class="row" style="justify-content:flex-end;margin-top:18px">${close}</div>`;
+  else if(!fb.loaded)h=`<h3 class="dh">Đang kết nối…</h3><div class="row" style="justify-content:flex-end;margin-top:18px">${close}</div>`;
+  else if(fb.user)h=`<h3 class="dh">Xin chào, ${esc(userName(fb.user))}</h3><p class="dp">${esc(fb.user.email||'')}</p><div class="row" style="justify-content:space-between;margin-top:18px"><button type="button" class="btn danger" data-act="aLogout">Đăng xuất</button>${close}</div>`;
+  else{const su=aMode==='signup';
+    h=`<h3 class="dh">${su?'Tạo tài khoản':'Đăng nhập'}</h3><p class="dp">Cần tài khoản để đăng truyện. Chỉ đọc truyện thì không cần đăng nhập.</p>
+    <div class="tabs"><button type="button" class="btn" data-act="aMode" data-m="login" aria-pressed="${!su}">Đăng nhập</button><button type="button" class="btn" data-act="aMode" data-m="signup" aria-pressed="${su}">Đăng ký</button></div>
+    <form id="authForm" novalidate>${su?'<label for="aName">Tên hiển thị</label><input id="aName" maxlength="40" autocomplete="nickname">':''}
+    <label for="aEmail">Email</label><input id="aEmail" type="email" autocomplete="email">
+    <label for="aPass">Mật khẩu</label><input id="aPass" type="password" autocomplete="${su?'new-password':'current-password'}">
+    <div class="err" role="alert">${esc(aErr)}</div>
+    <div class="row" style="justify-content:space-between"><button type="button" class="btn" data-act="aGoogle">Dùng Google</button><div class="row">${close}<button type="submit" class="btn primary">${su?'Tạo tài khoản':'Đăng nhập'}</button></div></div></form>`}
+  b.innerHTML=h;
+  if($('#aName'))$('#aName').value=keep.n;if($('#aEmail')){$('#aEmail').value=keep.e;$('#aPass').value=keep.p}
+}
+document.addEventListener('submit',e=>{if(e.target.id==='authForm'){e.preventDefault();authSubmit()}});
+async function authSubmit(){
+  const email=$('#aEmail').value.trim(),pw=$('#aPass').value,nm=$('#aName')?$('#aName').value.trim():'';
+  if(!email||!pw){aErr='Hãy nhập email và mật khẩu.';authPaint();return}
+  const sb=$('#authForm button[type=submit]');if(sb)sb.disabled=true;
+  try{
+    const A=fb.a;
+    if(aMode==='signup'){const c=await A.createUserWithEmailAndPassword(fb.auth,email,pw);await A.updateProfile(c.user,{displayName:nm||email.split('@')[0]})}
+    else await A.signInWithEmailAndPassword(fb.auth,email,pw);
+    aErr='';authUi();authPaint();
+  }catch(e){aErr=fbMsg(e);authPaint()}
+}
+async function authGoogle(){
+  try{await fb.a.signInWithPopup(fb.auth,new fb.a.GoogleAuthProvider());aErr='';authUi();authPaint()}
+  catch(e){aErr=fbMsg(e);authPaint()}
+}
+async function authLogout(){try{await fb.a.signOut(fb.auth)}catch(e){}$('#authDlg').close();authUi()}
+
+/* đăng / gỡ truyện */
+function pubBtns(n){
+  return `<button class="btn" data-act="pubNovel">☁ ${n.pubId?'Cập nhật bản đã đăng':'Đăng lên thư viện chung'}</button>${n.pubId?`<button class="btn" data-act="copyLink">🔗 Sao chép liên kết</button><button class="btn" data-act="unpub">Gỡ khỏi thư viện chung</button>`:''}`;
+}
+async function commitOps(ops){
+  let b=fb.f.writeBatch(fb.fs),c=0,sz=0;
+  for(const o of ops){
+    if(c&&(c>=400||sz+o.sz>7e6)){await b.commit();b=fb.f.writeBatch(fb.fs);c=0;sz=0}
+    o.f(b);c++;sz+=o.sz;
+  }
+  if(c)await b.commit();
+}
+async function doPublish(n){
+  const F=fb.f,u=fb.user;
+  for(const c of n.chapters){if(new Blob([c.content||'']).size>900000)throw new Error('Chương “'+(c.title||'chưa đặt tên')+'” dài hơn 900 KB, hãy tách nhỏ ra trước khi đăng.')}
+  if(!n.pubId||n.pubOwner!==u.uid){n.pubId=F.doc(F.collection(fb.fs,'stories')).id;n.pubOwner=u.uid;n.pubAt=Date.now();n.pubImgs=[]}
+  const sref=F.doc(fb.fs,'stories',n.pubId);
+  await F.setDoc(sref,{ownerUid:u.uid,ownerName:userName(u),title:n.title,author:n.author||'',desc:n.desc||'',chapterCount:n.chapters.length,words:total(n),createdAt:n.pubAt||Date.now(),updatedAt:Date.now()});
+  const old=await F.getDocs(F.collection(sref,'chapters')),keep=new Set(n.chapters.map(c=>c.id)),ops=[];
+  old.forEach(d=>{if(!keep.has(d.id))ops.push({f:b=>b.delete(d.ref),sz:1})});
+  n.chapters.forEach((c,i)=>ops.push({f:b=>b.set(F.doc(sref,'chapters',c.id),{order:i,title:c.title||'',content:c.content||''}),sz:(c.content||'').length*3+200}));
+  const have=new Set(n.pubImgs||[]),used=new Set(),sent=[];
+  n.chapters.forEach(c=>{for(const m of (c.content||'').matchAll(/\[\[img:([\w-]+)/g))used.add(m[1])});
+  used.forEach(id=>{
+    if(have.has(id)){sent.push(id);return}
+    const d=imgSrc(id);if(!d||d.length>900000||!SAFE_IMG.test(d))return;
+    ops.push({f:b=>b.set(F.doc(sref,'images',id),{data:d}),sz:d.length+100});sent.push(id);
+  });
+  await commitOps(ops);
+  n.pubImgs=sent;save();
+}
+async function doUnpub(n){
+  const F=fb.f,sref=F.doc(fb.fs,'stories',n.pubId),ops=[];
+  for(const sub of ['chapters','images']){const q=await F.getDocs(F.collection(sref,sub));q.forEach(d=>ops.push({f:b=>b.delete(d.ref),sz:1}))}
+  await commitOps(ops);await F.deleteDoc(sref);
+  delete n.pubId;delete n.pubOwner;delete n.pubAt;delete n.pubImgs;save();
+}
+async function pubAction(kind){
+  const n=novel();if(!n)return;
+  const ok=await fbInit();
+  if(!ok){openAuth();return}
+  if(!fb.user){openAuth('login','Hãy đăng nhập để đăng truyện.');return}
+  const btn=document.querySelector(`[data-act="${kind==='pub'?'pubNovel':'unpub'}"]`);
+  try{
+    if(kind==='pub'){
+      if(!n.chapters.length){alert('Truyện chưa có chương nào để đăng.');return}
+      if(!n.pubId&&!confirm('Truyện này sẽ hiển thị công khai trong thư viện chung, ai cũng đọc được. Tiếp tục đăng?'))return;
+      if(btn){btn.disabled=true;btn.textContent='Đang đăng…'}
+      await doPublish(n);render();alert('Đã đăng xong! Dùng nút “Sao chép liên kết” để gửi truyện cho người khác.');
+    }else{
+      if(n.pubOwner!==fb.user.uid){alert('Hãy đăng nhập đúng tài khoản đã đăng truyện này.');return}
+      if(!confirm('Gỡ truyện khỏi thư viện chung? Bản trong tủ truyện của bạn vẫn được giữ lại.'))return;
+      if(btn){btn.disabled=true;btn.textContent='Đang gỡ…'}
+      await doUnpub(n);render();
+    }
+  }catch(e){console.error(e);alert(fbMsg(e));render()}
+}
+function copyLink(){
+  const n=novel();if(!n||!n.pubId)return;
+  const u=location.origin+location.pathname+'?s='+n.pubId;
+  if(location.protocol==='file:'){alert('Bạn đang mở trang từ máy tính nên liên kết chưa dùng được. Khi trang đã được đưa lên mạng, liên kết sẽ có dạng:\n'+u);return}
+  (navigator.clipboard?navigator.clipboard.writeText(u):Promise.reject()).then(()=>alert('Đã sao chép liên kết chia sẻ.'),()=>prompt('Sao chép liên kết này:',u));
+}
+
+/* thư viện chung */
+let pubCache=null;
+function pubCards(list){
+  if(!list.length)return '<div class="empty"><div style="font-size:2.4rem">✿</div><p>Chưa có truyện nào được đăng. Hãy là người đầu tiên!</p></div>';
+  return `<div class="grid">${list.map((s,i)=>`<button class="book" data-act="openPub" data-id="${esc(s.id)}"><div class="cover" style="background:linear-gradient(155deg,${covers[i%6]},${covers[(i+3)%6]})"><h3>${esc(s.title)}</h3><small>${esc(s.author||s.ownerName||'Chưa rõ tác giả')}</small></div><div class="meta">${+s.chapterCount||0} chương · ${(+s.words||0).toLocaleString('vi-VN')} từ<br>Đăng bởi ${esc(s.ownerName||'ẩn danh')}</div></button>`).join('')}</div>`;
+}
+async function renderPub(){
+  app.innerHTML=`<div class="wrap"><h1 class="page">Thư viện chung</h1><p class="sub">Truyện do mọi người cùng đăng. Bấm vào một cuốn để đọc, không cần đăng nhập.</p>
+  <div class="row"><button class="btn ghost" data-act="home">← Tủ truyện của tôi</button><button class="btn" data-act="pubRefresh">↻ Làm mới</button></div>
+  <div id="pubBox">${pubCache?pubCards(pubCache):'<div class="empty"><p>Đang tải…</p></div>'}</div></div>`;
+  window.scrollTo(0,0);
+  const ok=await fbInit(),show=h=>{const b=$('#pubBox');if(b&&view.n==='pub')b.innerHTML=h};
+  if(!ok){show(`<div class="empty"><p>${fbOn()?'Không kết nối được tới thư viện chung. Hãy kiểm tra mạng rồi thử lại.':'Thư viện chung chưa được kết nối. Chủ trang cần dán cấu hình Firebase vào FIREBASE_CONFIG trong file index.html.'}</p></div>`);return}
+  try{
+    const F=fb.f,q=await F.getDocs(F.query(F.collection(fb.fs,'stories'),F.orderBy('updatedAt','desc'),F.limit(60)));
+    pubCache=q.docs.map(d=>({id:d.id,...d.data()}));show(pubCards(pubCache));
+  }catch(e){console.error(e);show(`<div class="empty"><p>${esc(fbMsg(e))}</p></div>`)}
+}
+async function openStory(id){
+  if(!SAFE_ID.test(id||''))return;
+  const ok=await fbInit();if(!ok){openAuth();return}
+  document.body.style.cursor='progress';
+  try{
+    const F=fb.f,s=await F.getDoc(F.doc(fb.fs,'stories',id));
+    if(!s.exists()){alert('Truyện này không còn trên thư viện chung.');return}
+    const d=s.data(),cs=await F.getDocs(F.query(F.collection(s.ref,'chapters'),F.orderBy('order')));
+    const chapters=cs.docs.map((x,i)=>({id:'p'+i,title:String(x.data().title||''),content:String(x.data().content||'')}));
+    if(!chapters.length){alert('Truyện này chưa có chương nào.');return}
+    const ids=new Set();chapters.forEach(c=>{for(const m of c.content.matchAll(/\[\[img:([\w-]+)/g))ids.add(m[1])});
+    await Promise.all([...ids].map(async i=>{
+      if(imgSrc(i))return;
+      try{const g=await F.getDoc(F.doc(s.ref,'images',i));const v=g.exists()?g.data().data:'';if(typeof v==='string'&&SAFE_IMG.test(v))imgMem[i]=v}catch(e){}
+    }));
+    tmp={id:'tmp',remote:true,srcId:id,title:String(d.title||''),author:String(d.author||d.ownerName||''),desc:String(d.desc||''),chapters};
+    view={n:'pub',id:'tmp'};openReader(chapters[0].id);
+  }catch(e){console.error(e);alert(fbMsg(e))}
+  finally{document.body.style.cursor=''}
+}
+function fbStart(){
+  const q=new URLSearchParams(location.search).get('s');
+  if(fbOn())fbInit().then(ok=>{if(ok&&q&&SAFE_ID.test(q))openStory(q)});
+}
+
 addEventListener('beforeunload',flush);
-load();themeLbl();initMarks();initVoice();initImg();idbInit();render();
+load();themeLbl();initMarks();initVoice();initImg();idbInit();render();fbStart();
 </script>
 </body>
 </html>
